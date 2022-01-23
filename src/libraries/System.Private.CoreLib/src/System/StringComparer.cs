@@ -12,7 +12,7 @@ namespace System
 {
     [Serializable]
     [System.Runtime.CompilerServices.TypeForwardedFrom("mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")]
-    public abstract class StringComparer : IComparer, IEqualityComparer, IComparer<string?>, IEqualityComparer<string?>, IInternalReadOnlySpanEqualityComparer<char>
+    public abstract class StringComparer : IComparer, IEqualityComparer, IComparer<string?>, IEqualityComparer<string?>
     {
         public static StringComparer InvariantCulture => CultureAwareComparer.InvariantCaseSensitiveInstance;
 
@@ -211,31 +211,15 @@ namespace System
         }
 
         public abstract int Compare(string? x, string? y);
-        public virtual bool Equals(string? x, string? y)
-        {
-            if (object.ReferenceEquals(x, y)) return true;
-            if (x == null || y == null) return false;
-            return Equals(x.AsSpan(), y.AsSpan());
-        }
-
+        public abstract bool Equals(string? x, string? y);
 #pragma warning disable CS8614 // Remove warning disable when nullable attributes are respected
-        public virtual int GetHashCode(string obj)
-        {
-            if (obj is null)
-            {
-                throw new ArgumentNullException(nameof(obj));
-            }
-            return GetHashCode(obj.AsSpan());
-        }
+        public abstract int GetHashCode(string obj);
 #pragma warning restore CS8614
-
-        public abstract bool Equals(System.ReadOnlySpan<char> x, System.ReadOnlySpan<char> y);
-        public abstract int GetHashCode(System.ReadOnlySpan<char> obj);
     }
 
     [Serializable]
     [System.Runtime.CompilerServices.TypeForwardedFrom("mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")]
-    public sealed class CultureAwareComparer : StringComparer, ISerializable
+    public sealed class CultureAwareComparer : StringComparer, ISerializable, IInternalReadOnlySpanEqualityComparer<char>
     {
         internal static readonly CultureAwareComparer InvariantCaseSensitiveInstance = new CultureAwareComparer(CompareInfo.Invariant, CompareOptions.None);
         internal static readonly CultureAwareComparer InvariantIgnoreCaseInstance = new CultureAwareComparer(CompareInfo.Invariant, CompareOptions.IgnoreCase);
@@ -279,12 +263,25 @@ namespace System
             return _compareInfo.Compare(x, y, _options);
         }
 
-        public override bool Equals(ReadOnlySpan<char> x, ReadOnlySpan<char> y) => _compareInfo.Compare(x, y, _options) == 0;
-
-        public override int GetHashCode(ReadOnlySpan<char> obj)
+        public override bool Equals(string? x, string? y)
         {
+            if (object.ReferenceEquals(x, y)) return true;
+            if (x == null || y == null) return false;
+            return _compareInfo.Compare(x, y, _options) == 0;
+        }
+
+        public bool Equals(ReadOnlySpan<char> x, ReadOnlySpan<char> y) => _compareInfo.Compare(x, y, _options) == 0;
+
+        public override int GetHashCode(string obj)
+        {
+            if (obj == null)
+            {
+                throw new ArgumentNullException(nameof(obj));
+            }
             return _compareInfo.GetHashCode(obj, _options);
         }
+
+        public int GetHashCode(ReadOnlySpan<char> obj) => _compareInfo.GetHashCode(obj, _options);
 
         // Equals method for the comparer itself.
         public override bool Equals([NotNullWhen(true)] object? obj)
@@ -343,31 +340,37 @@ namespace System
             return string.CompareOrdinal(x, y);
         }
 
-        public override bool Equals(ReadOnlySpan<char> x, ReadOnlySpan<char> y)
+        public override bool Equals(string? x, string? y)
         {
+            if (ReferenceEquals(x, y))
+                return true;
+            if (x == null || y == null)
+                return false;
+
             if (_ignoreCase)
             {
                 if (x.Length != y.Length)
                 {
                     return false;
                 }
-                if (x.Length == 0)
-                {
-                    return true;
-                }
-                return System.Globalization.Ordinal.EqualsIgnoreCase(ref MemoryMarshal.GetReference(x), ref MemoryMarshal.GetReference(y), x.Length);
+                return System.Globalization.Ordinal.EqualsIgnoreCase(ref x.GetRawStringData(), ref y.GetRawStringData(), x.Length);
             }
-            return x.SequenceEqual(y);
+            return x.Equals(y);
         }
 
-        public override int GetHashCode(ReadOnlySpan<char> obj)
+        public override int GetHashCode(string obj)
         {
-            if (_ignoreCase)
+            if (obj == null)
             {
-                return string.GetHashCodeOrdinalIgnoreCase(obj);
+                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.obj);
             }
 
-            return string.GetHashCode(obj);
+            if (_ignoreCase)
+            {
+                return obj.GetHashCodeOrdinalIgnoreCase();
+            }
+
+            return obj.GetHashCode();
         }
 
         // Equals method for the comparer itself.
@@ -394,7 +397,7 @@ namespace System
     }
 
     [Serializable]
-    internal sealed class OrdinalCaseSensitiveComparer : OrdinalComparer, ISerializable
+    internal sealed class OrdinalCaseSensitiveComparer : OrdinalComparer, ISerializable, IInternalReadOnlySpanEqualityComparer<char>
     {
         internal static readonly OrdinalCaseSensitiveComparer Instance = new OrdinalCaseSensitiveComparer();
 
@@ -406,6 +409,8 @@ namespace System
 
         public override bool Equals(string? x, string? y) => string.Equals(x, y);
 
+        public bool Equals(ReadOnlySpan<char> x, ReadOnlySpan<char> y) => x.SequenceEqual(y);
+
         public override int GetHashCode(string obj)
         {
             if (obj == null)
@@ -415,9 +420,7 @@ namespace System
             return obj.GetHashCode();
         }
 
-        public override bool Equals(ReadOnlySpan<char> x, ReadOnlySpan<char> y) => string.CompareOrdinal(x, y) == 0;
-
-        public override int GetHashCode(ReadOnlySpan<char> obj) => string.GetHashCode(obj);
+        public int GetHashCode(ReadOnlySpan<char> obj) => string.GetHashCode(obj);
 
         public void GetObjectData(SerializationInfo info, StreamingContext context)
         {
@@ -427,7 +430,7 @@ namespace System
     }
 
     [Serializable]
-    internal sealed class OrdinalIgnoreCaseComparer : OrdinalComparer, ISerializable
+    internal sealed class OrdinalIgnoreCaseComparer : OrdinalComparer, ISerializable, IInternalReadOnlySpanEqualityComparer<char>
     {
         internal static readonly OrdinalIgnoreCaseComparer Instance = new OrdinalIgnoreCaseComparer();
 
@@ -457,6 +460,19 @@ namespace System
             return System.Globalization.Ordinal.EqualsIgnoreCase(ref x.GetRawStringData(), ref y.GetRawStringData(), x.Length);
         }
 
+        public bool Equals(ReadOnlySpan<char> x, ReadOnlySpan<char> y)
+        {
+            if (x.Length != y.Length)
+            {
+                return false;
+            }
+            if (x.IsEmpty)
+            {
+                return true;
+            }
+            return System.Globalization.Ordinal.EqualsIgnoreCase(ref MemoryMarshal.GetReference(x), ref MemoryMarshal.GetReference(y), x.Length);
+        }
+
         public override int GetHashCode(string obj)
         {
             if (obj == null)
@@ -466,22 +482,7 @@ namespace System
             return obj.GetHashCodeOrdinalIgnoreCase();
         }
 
-        public override bool Equals(ReadOnlySpan<char> x, ReadOnlySpan<char> y)
-        {
-            if (x.Length != y.Length)
-            {
-                return false;
-            }
-
-            if (x.Length == 0)
-            {
-                return true;
-            }
-
-            return System.Globalization.Ordinal.EqualsIgnoreCase(ref MemoryMarshal.GetReference(x), ref MemoryMarshal.GetReference(y), x.Length);
-        }
-
-        public override int GetHashCode(ReadOnlySpan<char> obj) => string.GetHashCodeOrdinalIgnoreCase(obj);
+        public int GetHashCode(ReadOnlySpan<char> obj) => string.GetHashCodeOrdinalIgnoreCase(obj);
 
         public void GetObjectData(SerializationInfo info, StreamingContext context)
         {
